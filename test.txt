@@ -1,0 +1,232 @@
+Here's an enhanced "juicy" version with improved visuals, animations, and sound effects:
+
+**Enhanced ColorSortGame.gd**
+```gdscript
+extends Node2D
+
+# Add these new properties
+var move_count = 0
+var is_pouring = false
+var current_level = 1
+var color_palettes = [
+    [Color("#ff6666"), Color("#66ff66"), Color("#6666ff"), Color("#ffff66")],
+    [Color("#ff99cc"), Color("#99ff99"), Color("#99ccff"), Color("#ffff99")],
+    [Color("#cc0066"), Color("#00cc66"), Color("#0066cc"), Color("#cccc00")]
+]
+
+# Add these new onready vars
+onready var camera = $Camera2D
+onready var tween = $Tween
+onready var pour_sound = $PourSound
+onready var success_sound = $SuccessSound
+onready var error_sound = $ErrorSound
+onready_timer win_delay_timer = $WinDelayTimer
+
+func _ready():
+    randomize()
+    apply_color_palette()
+    restart_game()
+
+func apply_color_palette():
+    colors = color_palettes[(current_level-1) % color_palettes.size()]
+
+# Add these new functions
+func screen_shake(intensity = 5, duration = 0.2):
+    var initial_offset = camera.position
+    tween.interpolate_property(camera, "position", 
+        initial_offset + Vector2(rand_range(-intensity, intensity), rand_range(-intensity, intensity)),
+        duration, Tween.TRANS_SINE, Tween.EASE_IN_OUT)
+    tween.start()
+    yield(tween, "tween_completed")
+    camera.position = initial_offset
+
+func animate_color_transfer(source, target, amount):
+    is_pouring = true
+    var pour_duration = 0.3
+    for i in range(amount):
+        var dummy_color = ColorRect.new()
+        dummy_color.color = source.get_top_color()
+        dummy_color.rect_size = Vector2(40, 40)
+        dummy_color.rect_position = source.global_position + Vector2(20, -40)
+        add_child(dummy_color)
+        
+        tween.interpolate_property(dummy_color, "rect_position",
+            dummy_color.rect_position, target.global_position + Vector2(20, -40),
+            pour_duration, Tween.TRANS_BACK, Tween.EASE_OUT)
+        tween.interpolate_property(dummy_color, "modulate:a",
+            1.0, 0.0, pour_duration)
+        tween.start()
+        yield(tween, "tween_completed")
+        dummy_color.queue_free()
+    is_pouring = false
+
+# Modified try_pour function with animations
+func try_pour(source, target):
+    if is_pouring || source == target || source.is_empty():
+        return
+    
+    var source_color = source.get_top_color()
+    var source_count = source.get_top_count()
+    var target_color = target.get_top_color()
+    
+    if target.is_full() || (!target.is_empty() && target_color != source_color):
+        error_sound.play()
+        screen_shake(3, 0.1)
+        source.animate_error()
+        return
+    
+    pour_sound.play()
+    move_count += 1
+    $MovesLabel.text = "Moves: %d" % move_count
+    
+    var pour_amount = min(source_count, target.available_space())
+    animate_color_transfer(source, target, pour_amount)
+    yield(tween, "tween_completed")
+    
+    for _i in range(pour_amount):
+        target.colors.append(source.colors.pop_back())
+    
+    source.update_colors()
+    target.update_colors()
+    screen_shake(2, 0.1)
+    source.animate_pour()
+    target.animate_receive()
+    
+    if check_win():
+        success_sound.play()
+        win_delay_timer.start(0.5)  # Wait for animations to finish
+
+func _on_WinDelayTimer_timeout():
+    show_victory()
+
+func show_victory():
+    $VictoryPanel.scale = Vector2.ZERO
+    $VictoryPanel.visible = true
+    tween.interpolate_property($VictoryPanel, "scale", 
+        Vector2.ZERO, Vector2.ONE, 0.5, Tween.TRANS_BOUNCE)
+    tween.start()
+    $Particles2D.emitting = true
+```
+
+**Enhanced Tube.gd**
+```gdscript
+# Add these new properties
+export(float) var max_wobble_angle = 5.0
+export(float) var wobble_speed = 10.0
+var wobble_phase = 0.0
+
+func update_colors():
+    for i in range(4):
+        var color_rect = color_rects[i]
+        if i < colors.size():
+            tween.interpolate_property(color_rect, "color",
+                color_rect.color, colors[i], 0.3)
+        else:
+            tween.interpolate_property(color_rect, "color",
+                color_rect.color, Color.transparent, 0.3)
+    tween.start()
+
+func animate_pour():
+    $PourParticles.emitting = true
+    var original_scale = scale
+    tween.interpolate_property(self, "scale", 
+        original_scale * 0.9, original_scale, 
+        0.2, Tween.TRANS_BACK, Tween.EASE_OUT)
+    tween.start()
+
+func animate_receive():
+    var original_position = position
+    tween.interpolate_property(self, "position", 
+        position + Vector2(0, -10), original_position, 
+        0.3, Tween.TRANS_ELASTIC)
+    tween.start()
+
+func animate_error():
+    tween.interpolate_property(self, "position:x",
+        position.x + 5, position.x, 
+        0.1, Tween.TRANS_SINE, Tween.EASE_IN_OUT, 3)
+    tween.start()
+
+func _process(delta):
+    # Wobble animation
+    if highlight_sprite.visible:
+        wobble_phase += delta * wobble_speed
+        rotation_degrees = sin(wobble_phase) * max_wobble_angle
+```
+
+**New Elements to Add:**
+1. **Particles2D** node for victory effect
+2. **Camera2D** node with slight smoothing
+3. **AudioStreamPlayer** nodes for sound effects
+4. **VictoryPanel** (Container with Label and Next Level button)
+5. **MovesLabel** to show current moves
+6. **ColorTransitionShader** (for smooth color changes):
+```glsl
+// color_transition.shader
+shader_type canvas_item;
+uniform vec4 new_color : hint_color;
+
+void fragment() {
+    vec4 current_color = texture(TEXTURE, UV);
+    COLOR = mix(current_color, new_color, 0.1);
+}
+```
+
+**Juice Features Added:**
+1. Smooth color transitions with tweening
+2. Particle effects when pouring/receiving colors
+3. Screen shake on important actions
+4. Tube wobble animation when selected
+5. Squash/stretch animations on interaction
+6. Floating color elements during pours
+7. Victory screen with bounce animation
+8. Multiple color palettes per level
+9. Move counter with label
+10. Sound effects for all actions
+11. Level progression system
+12. Error feedback animations
+13. Dynamic background (add this to the scene):
+```gdscript
+# Background.gd
+extends ParallaxBackground
+
+func _ready():
+    randomize()
+    $ColorRect.material = ShaderMaterial.new()
+    $ColorRect.material.shader = preload("res://background_shader.gdshader")
+
+# background_shader.gdshader
+shader_type canvas_item;
+
+void fragment() {
+    vec2 uv = UV * 2.0 - 1.0;
+    float time = TIME * 0.2;
+    
+    vec3 color = vec3(
+        sin(uv.x * 5.0 + time) * 0.5 + 0.5,
+        cos(uv.y * 3.0 + time) * 0.5 + 0.5,
+        sin((uv.x + uv.y) * 2.0 + time) * 0.5 + 0.5
+    );
+    
+    COLOR = vec4(color * 0.3, 1.0);
+}
+```
+
+**Additional Recommendations:**
+1. Add "Undo" functionality
+2. Implement a hint system
+3. Add multiple difficulty levels
+4. Create tube skins that unlock with progress
+5. Add daily challenges
+6. Implement colorblind mode
+7. Add progress save/load system
+
+These enhancements create a much more polished and satisfying experience with:
+- Better visual feedback
+- Professional sound design
+- Smooth animations
+- Addictive progression
+- Tactile interactions
+- Environmental storytelling through visuals
+
+Would you like me to elaborate on any particular aspect of these enhancements?
